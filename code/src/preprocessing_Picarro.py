@@ -418,10 +418,9 @@ def main(site, analyzer, date, average_time='1min'):
             df_avg = average_daily_data(df_daily_clean, average_time, std=True, se=True)
             df_avg = fill_missing_data(df_avg, average_time)
             
-            return df_avg
             # store processed data
-            #folder_level2a = processed_data_folder_level2a(folder)
-            #store_processed_data(folder_level2a, site, species, date, df_avg)
+            folder_level2a = processed_data_folder_level2a(folder)
+            store_processed_data(folder_level2a, site, species, date, df_avg)
 
 
 if __name__ == "__main__":
