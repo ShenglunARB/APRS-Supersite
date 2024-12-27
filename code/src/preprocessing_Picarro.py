@@ -299,7 +299,8 @@ def average_daily_data(df_daily_clean, average_time, std=True, se=True):
     agg_funcs = {col: ['mean', 'std', calc_se] for col in df.columns} 
 
     # Resample and aggregate 
-    df_avg = df.resample(average_time).agg(agg_funcs) 
+    df_avg = df.resample(average_time).agg(agg_funcs)
+    df_avg = df_avg.round(3) 
 
     # Flatten the MultiIndex columns 
     new_columns = [] 
@@ -311,6 +312,14 @@ def average_daily_data(df_daily_clean, average_time, std=True, se=True):
 
 
 def fill_missing_data(df_avg, average_time):
+    """
+    Used to fill in missing time in a specific time range.
+    Input:
+        df_avg: dataframe, averaged data
+        average_time: str, time to average (e.g. '1min', '10min')
+    Output:
+        df_avg: dataframe, averaged data with missing time filled
+    """
     
     df_avg['TIME'] = df_avg.index.time
 
