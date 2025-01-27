@@ -28,7 +28,7 @@ def standardize_name(analyzer):
     if analyzer == 'G2401' or analyzer == 'CO' or analyzer == 'CO2' \
         or analyzer == 'CH4' or analyzer == 'CO_Picarro':
         analyzer = 'CO_Picarro'
-        species = 'CO2-CO-CH4-H2O'
+        species = 'CO2-CO-CH4'
 
     elif analyzer == 'Formaldehyde' or analyzer == 'HCHO' or analyzer == 'G2307' \
         or analyzer == 'HCHO_Picarro':
@@ -469,12 +469,12 @@ def main(site, analyzer, date, average_time='1min'):
 
 
 if __name__ == "__main__":
-    site = 'MWO' # 'Fresno-Garland Supersite'
-    analyzer = 'CO'
+    site = 'Fresno-Garland Supersite' # 'Fresno-Garland Supersite', 'Berkersfield-CA Supersite', 'MWO'
+    analyzer = 'CO' # 'CO', 'HCHO', 'NH3'
     #date = '2024-11-01'
     #main(site, analyzer, date, average_time='1min')
 
-    dates = pd.date_range(start='2024-01-01', end='2024-12-31', freq='D')
+    dates = pd.date_range(start='2023-11-20', end='2024-12-31', freq='D')
     
     for date in dates:
-        main(site, analyzer, date, average_time='60min')
+        main(site, analyzer, date, average_time='1min')
