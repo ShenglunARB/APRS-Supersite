@@ -91,7 +91,7 @@ def find_daily_raw_datafile(folder, date):
     dd = date.strftime('%d')
     
     # get all files in the directory when folder and data file exist
-    folderpath = folder + '/Level1_Raw_Data/' + YY + '/' + mm + '/' + dd
+    folderpath = folder + '/Level0_Raw_Data/' + YY + '/' + mm + '/' + dd
     
     if not os.path.exists(folderpath):
         print('Folder not found on ', date.strftime('%Y%m%d'), '!')
@@ -109,7 +109,7 @@ def find_daily_raw_datafile(folder, date):
         date2 = date - pd.DateOffset(days=1)
         YYmm2 = date2.strftime('%Y%m')
         dd2 = date2.strftime('%d')
-        folderpath2 = folder + '/Level1_Raw_Data/' + YYmm2 + '/' + dd2
+        folderpath2 = folder + '/Level0_Raw_Data/' + YYmm2 + '/' + dd2
 
         # check if the folderpath2 exists
         if not os.path.exists(folderpath2):
@@ -254,25 +254,31 @@ def clean_parameter_column(df_daily_nowarning, analyzer):
         df_daily_clean: dataframe, daily raw data with useful columns
     """
 
-    column_dict = {'CO_Picarro': ['DATE', 'TIME', 'CO', 'CO2_dry', 'CH4_dry', 'H2O'],
+    column_dict = {'CO_Picarro': ['DATE', 'TIME', 'CO', 'CO2', 'CO2_dry', 
+                                  'CH4', 'CH4_dry', 'H2O'],
                    'HCHO_Picarro': ['DATE', 'TIME', 'H2CO'],
-                   'NH3_Picarro': ['DATE', 'TIME', 'NH3_dry']}
+                   'NH3_Picarro': ['DATE', 'TIME', 'NH3', 'NH3_dry']}
 
     parameter_columns = column_dict[analyzer]
     
     df_daily_clean = df_daily_nowarning.copy()
+
+    # Renaming the columns (no '_sync' for sync data) 
+    df_daily_clean.columns = \
+        [col.replace('_sync', '') for col in df_daily_clean.columns]
+
     df_daily_clean = df_daily_clean[parameter_columns]
 
     # rename columns
-    if analyzer == 'CO_Picarro':
-        df_daily_clean.rename(
-            columns={'CO2_dry':'CO2', 'CH4_dry':'CH4', 'H2O':'H2O'}, inplace=True
-        )
+    #if analyzer == 'CO_Picarro':
+    #    df_daily_clean.rename(
+    #        columns={'CO2_dry':'CO2', 'CH4_dry':'CH4', 'H2O':'H2O'}, inplace=True
+    #    )
     
-    if analyzer == 'NH3_Picarro':
-        df_daily_clean.rename(
-            columns={'NH3_dry':'NH3'}, inplace=True
-        )
+    #if analyzer == 'NH3_Picarro':
+    #    df_daily_clean.rename(
+    #        columns={'NH3_dry':'NH3'}, inplace=True
+    #    )
 
     return df_daily_clean
 
@@ -334,7 +340,7 @@ def fill_missing_data(df_avg, average_time):
     return df_avg
 
 
-def processed_data_folder_level2a(folder):
+def processed_data_folder_level1a(folder):
     """
     Generate folder path to store processed data.
     Input:
@@ -343,18 +349,34 @@ def processed_data_folder_level2a(folder):
         folder: str, folder path to store processed data
     """
 
-    folder_level2a = folder + '/Level2A_Processed_Data_1min'
+    folder_level1a = folder + '/Level1A_Processed_Data_1min'
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    return folder_level2a
+    return folder_level1a
 
 
-def store_processed_data(folder_level2a, site, species, date, df_avg):
+def processed_data_folder_level1b(folder):
+    """
+    Generate folder path to store processed data.
+    Input:
+        folder: str, folder path to the analyzer data. From function: find_data_folder
+    Output:
+        folder: str, folder path to store processed data
+    """
+
+    folder_level1b = folder + '/Level1B_Processed_Data_1hr'
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+
+    return folder_level1b
+
+
+def store_processed_data(folder_level1a, site, species, date, df_avg):
     """
     Store processed data to the folder.
     Input:
-        folder_level2a: str, folder path to store processed data
+        folder_level1a: str, folder path to store processed data
         site: str, site name (e.g. 'Fresno-Garland Supersite')
         analyzer: str, standard species name
         date: datetime, date to process
@@ -366,10 +388,15 @@ def store_processed_data(folder_level2a, site, species, date, df_avg):
     # create file name
     site_name = site.split('-')[0]
     monitor_name = 'Picarro-' + species
+    YY = pd.to_datetime(date).strftime('%Y')
     date = pd.to_datetime(date).strftime('%Y%m%d')
 
     filename = site_name + '_' + monitor_name + '_' + date + '.csv'
-    filepath = folder_level2a + '/' + filename
+    filepath = folder_level1a + '/' + YY + '/' + filename
+
+    # create folder if not exist
+    if not os.path.exists(folder_level1a + '/' + YY):
+        os.makedirs(folder_level1a + '/' + YY)
 
     # rename columns
     df_avg.rename(columns={'DATE':'DATE_UTC', 'TIME':'TIME_UTC'}, inplace=True)
@@ -428,8 +455,17 @@ def main(site, analyzer, date, average_time='1min'):
             df_avg = fill_missing_data(df_avg, average_time)
             
             # store processed data
-            folder_level2a = processed_data_folder_level2a(folder)
-            store_processed_data(folder_level2a, site, species, date, df_avg)
+            if average_time == '1min':
+                folder_level1a = processed_data_folder_level1a(folder)
+                store_processed_data(folder_level1a, site, species, date, df_avg)
+            
+            elif average_time == '60min':
+                folder_level1b = processed_data_folder_level1b(folder)
+                store_processed_data(folder_level1b, site, species, date, df_avg)
+            
+            else:
+                print('Invalid average time!')
+                pass
 
 
 if __name__ == "__main__":
@@ -438,7 +474,7 @@ if __name__ == "__main__":
     #date = '2024-11-01'
     #main(site, analyzer, date, average_time='1min')
 
-    dates = pd.date_range(start='2023-11-16', end='2024-11-30', freq='D')
+    dates = pd.date_range(start='2024-01-01', end='2024-12-31', freq='D')
     
     for date in dates:
-        main(site, analyzer, date, average_time='1min')
+        main(site, analyzer, date, average_time='60min')
