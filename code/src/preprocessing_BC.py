@@ -40,7 +40,7 @@ def find_data_folder(site, analyzer):
         folder: str The folder location that stores the data 
     """ 
     
-    base_path = "C:/Users/swu/OneDrive - California Air Resources Board/Shared Documents - RD ASCSB APRS/General/02. In-House Research_Needs cleaning/!Site Operations" 
+    base_path = "C:/Users/swu/OneDrive - California Air Resources Board/Shared Documents - RD ASCSB APRS/General/02. In-House Research/!Site Operations" 
 
     valid_sites = ['Fresno-Garland Supersite', 'Berkersfield-CA Supersite', 'MWO'] 
 
@@ -105,13 +105,27 @@ def daily_raw_data(filepath, date):
         df_daily: dataframe, daily raw data in one dataframe
     """
 
-    # get header line
-    with open(filepath, 'r') as f: 
-        header_line = [f.readline().strip() for _ in range(6)][-1].split('; ')
+    # get column names and control the number of fields by number of columns
+    def filter_extra_fields(line, num_fields):
+        return ' '.join(line.strip().split(' ')[:num_fields]) 
 
-    df = pd.read_csv(filepath, skiprows=6, header=None, sep=' ')
-    df_daily = df.iloc[:,0:len(header_line)]
-    df_daily.columns = header_line
+    with open(filepath, 'r') as f:
+        lines = f.readlines()
+
+    column_names = lines[5].strip().split('; ')
+    num_col = len(column_names)
+
+    # remove extra fields in each line (several lines have extra data than columns)
+    filtered_lines = [filter_extra_fields(line, num_col) for line in lines[8:]]
+
+    df_daily = pd.DataFrame(
+        [line.split(' ') for line in filtered_lines], 
+        columns=column_names
+    )
+
+    # conver data type to numeric
+    for col in df_daily.columns[2:]:
+        df_daily[col] = pd.to_numeric(df_daily[col], errors='coerce')
 
     # rename Date and Time columns
     df_daily.rename(
