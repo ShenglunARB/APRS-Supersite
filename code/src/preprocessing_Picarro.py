@@ -107,9 +107,10 @@ def find_daily_raw_datafile(folder, date):
 
         # get data from 1 day before (part of data was recorded on the previous day's data)
         date2 = date - pd.DateOffset(days=1)
-        YYmm2 = date2.strftime('%Y%m')
+        YY2 = date2.strftime('%Y')
+        mm2 = date2.strftime('%m')
         dd2 = date2.strftime('%d')
-        folderpath2 = folder + '/Level0_Raw_Data/' + YYmm2 + '/' + dd2
+        folderpath2 = folder + '/Level0_Raw_Data/' + YY + '/' + mm2 + '/' + dd2
 
         # check if the folderpath2 exists
         if not os.path.exists(folderpath2):
@@ -170,6 +171,9 @@ def daily_raw_data(filepath):
     
         # open single data file
         df = pd.read_csv(filepath[i], sep=r'\s+')
+
+        # Renaming the columns (no '_sync' for sync data) 
+        df.columns = [col.replace('_sync', '') for col in df.columns]
 
         # combine all data files
         df_daily = pd.concat([df_daily, df])
@@ -262,10 +266,6 @@ def clean_parameter_column(df_daily_nowarning, analyzer):
     parameter_columns = column_dict[analyzer]
     
     df_daily_clean = df_daily_nowarning.copy()
-
-    # Renaming the columns (no '_sync' for sync data) 
-    df_daily_clean.columns = \
-        [col.replace('_sync', '') for col in df_daily_clean.columns]
 
     df_daily_clean = df_daily_clean[parameter_columns]
 
@@ -470,11 +470,17 @@ def main(site, analyzer, date, average_time='1min'):
 
 if __name__ == "__main__":
     site = 'Fresno-Garland Supersite' # 'Fresno-Garland Supersite', 'Berkersfield-CA Supersite', 'MWO'
-    analyzer = 'CO' # 'CO', 'HCHO', 'NH3'
+    analyzer = 'NH3' # 'CO', 'HCHO', 'NH3'
     #date = '2024-11-01'
     #main(site, analyzer, date, average_time='1min')
 
-    dates = pd.date_range(start='2023-11-20', end='2024-12-31', freq='D')
+    dates = pd.date_range(start='2023-11-16', end='2024-12-31', freq='D')
     
     for date in dates:
         main(site, analyzer, date, average_time='1min')
+
+"""
+ALARM STATUS for PICARRO CO monitor: when CH4 > 5.5, ALARM STATUS == 2. 
+Bakersfield has higher CO2, CH4 level (raise alart)
+
+"""
