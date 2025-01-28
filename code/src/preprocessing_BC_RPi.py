@@ -41,7 +41,7 @@ def find_data_folder(site, analyzer):
         folder: str The folder location that stores the data 
     """ 
     
-    base_path = "C:/Users/swu/OneDrive - California Air Resources Board/Shared Documents - RD ASCSB APRS/General/02. In-House Research_Needs cleaning/!Site Operations" 
+    base_path = "C:/Users/swu/OneDrive - California Air Resources Board/Shared Documents - RD ASCSB APRS/General/02. In-House Research/!Site Operations" 
 
     valid_sites = ['Fresno-Garland Supersite', 'Berkersfield-CA Supersite', 'MWO'] 
 
