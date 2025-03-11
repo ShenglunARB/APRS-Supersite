@@ -180,14 +180,19 @@ def clean_warning_data(df_daily):
         df_daily_clean: dataframe, daily raw data without warning
     """
 
+    df_daily_nowarning = df_daily.copy()
+
+    # clean flow rate out of range 5 ± 5% L/min
     flowc = 5000
     range = 0.05
 
-    df_daily_nowarning = df_daily.copy()
     df_daily_nowarning = df_daily_nowarning[
         (df_daily_nowarning['Status'] == 0)&
         (df_daily_nowarning['FlowC'].between(flowc*(1-range), flowc*(1+range)))
     ]
+
+    # clean data with raw signal == 0 (i.e. RefCh1  == 0, usually if RefCh1 == 0, then all raw signal are 0)
+    df_daily_nowarning = df_daily_nowarning[df_daily_nowarning['RefCh1'] != 0]    
 
     # clean negative BCX values
     parameter = ['BC1','BC2','BC3','BC4','BC5','BC6', 'BC7']
