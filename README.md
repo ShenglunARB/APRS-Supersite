@@ -16,12 +16,12 @@ author: Shenglun Wu, shenglun.wu@arb.ca.gov
 - __Usage__:
   - preprocessing: retrive raw data, clean warning data, averaging data to 1min / 1hr resolution. 
     - Use script: preprocessing_Picarro.py, preprocessing_BC.py
-    - Change the "site", "analyzer", and "date" in main function in the script.
+    - Change the "site", "analyzer", and "date" under the main function in the script.
     - Run the script in Git Bash  
         ```python
-        nohup preprocessing_Picarro.py > ../../output/preprossing_{Location}_{Species}_{DateofProcessing}.out &
+        nohup python preprocessing_Picarro.py > ../../output/preprossing_{Location}_{Species}_{DateofProcessing}.out &
     
         # example
-        nohup preprocessing_Picarro.py > ../../output/preprocessing_Fresno_Picarro-CO_20241227.out &
+        nohup python preprocessing_Picarro.py > ../../output/preprocessing_Fresno_Picarro-CO_20241227.out &
         ```
     - Check .out file to see any warning need to be checked.
