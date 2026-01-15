@@ -57,7 +57,7 @@ def find_data_folder(site, analyzer):
         folder: str The folder location that stores the data 
     """ 
     
-    base_path = "C:/Users/swu/OneDrive - California Air Resources Board/Shared Documents - RD ASCSB APRS/General/02. In-House Research/!Site Operations" 
+    base_path = "C:/Users/swu/OneDrive - California Air Resources Board/Shared Documents - RD ASCSB APRS/General/02. In-House Research/!Site Operations"
 
     valid_sites = ['Fresno-Garland Supersite', 'Bakersfield-California Ave Supersite', 'MWO'] 
 
@@ -458,16 +458,12 @@ def main(site, analyzer, date, average_time='1min'):
 
 
 if __name__ == "__main__":
-    site = 'Fresno-Garland Supersite' # 'Fresno-Garland Supersite', 'Bakersfield-California Ave Supersite', 'MWO'
-    analyzer = 'NH3' # 'CO', 'HCHO', 'NH3'
+    site = 'MWO' # 'Fresno-Garland Supersite', 'Bakersfield-California Ave Supersite', 'MWO'
+    analyzer = 'CO' # 'CO', 'HCHO', 'NH3'
     #date = '2024-11-01'
     #main(site, analyzer, date, average_time='1min')
 
-    dates = pd.date_range(start='2023-11-14', end='2023-12-31', freq='D')
+    dates = pd.date_range(start='2025-12-30', end='2025-12-31', freq='D')
     
     for date in dates:
         main(site, analyzer, date, average_time='1min') # average time = '1min' or '60min'
-
-"""
-ALARM STATUS for PICARRO CO monitor: when CH4 > 5.5, ALARM STATUS == 2. 
-"""

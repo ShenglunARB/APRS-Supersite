@@ -43,7 +43,7 @@ def find_data_folder(site, analyzer):
     
     base_path = "C:/Users/swu/OneDrive - California Air Resources Board/Shared Documents - RD ASCSB APRS/General/02. In-House Research/!Site Operations" 
 
-    valid_sites = ['Fresno-Garland Supersite', 'Berkersfield-CA Supersite', 'MWO'] 
+    valid_sites = ['Fresno-Garland Supersite', 'Bakersfield-California Ave Supersite', 'MWO'] 
 
     if site not in valid_sites: 
         raise ValueError(f"Invalid site name '{site}'. Valid options are: {valid_sites}")
@@ -379,12 +379,12 @@ def main(site, analyzer, date, average_time='1min'):
 
 
 if __name__ == "__main__":
-    site = 'MWO' # 'Fresno-Garland Supersite', 'Berkersfield-CA Supersite', 'MWO'
+    site = 'MWO' # 'Fresno-Garland Supersite', 'Bakersfield-California Ave Supersite', 'MWO'
     analyzer = 'AE33'
     #date = '2024-11-01'
     #main(site, analyzer, date, average_time='1min')
 
-    dates = pd.date_range(start='2024-10-18', end='2024-12-31', freq='D')
+    dates = pd.date_range(start='2025-04-14', end='2025-11-30', freq='D')
     
     for date in dates:
-        main(site, analyzer, date, average_time='60min')
+        main(site, analyzer, date, average_time='60min') ## set to 1min or 60min
