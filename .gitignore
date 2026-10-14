@@ -1,0 +1,11 @@
+# Python virtual environment (created on your own computer, do not upload)
+.venv/
+venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Run logs (keep the example file so the output folder exists)
+output/*.out
+!output/test.out

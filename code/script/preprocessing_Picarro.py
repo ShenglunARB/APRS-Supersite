@@ -1,184 +1,237 @@
 """
-This source code is used to process raw data from Picarro monitor. 
+Preprocess raw data from the Picarro gas analyzers.
 
-Picarro monitors: 
-- Model: G2401, CO2-CO-CH4-H2O analyzer 
-- Model: G2307, HCHO analyzer
-- Model: G2103, NH3-H2O analyzer
+Picarro analyzers:
+    - Model G2401: CO2 / CO / CH4 / H2O analyzer   (ANALYZER = 'CO')
+    - Model G2307: HCHO (formaldehyde) analyzer     (ANALYZER = 'HCHO')
+    - Model G2103: NH3 (ammonia) / H2O analyzer      (ANALYZER = 'NH3')
 
-@auther: Shenglun Wu
+What this script does, for every day between START_DATE and END_DATE:
+    1. Finds the raw data files of that day (Level0_Raw_Data/YYYY/MM/DD/).
+    2. Prints a warning if the analyzer reported any alarm / status problem.
+    3. Removes the rows that have a warning.
+    4. Averages the data to 1-minute or 1-hour resolution (mean, std, se).
+    5. Saves one CSV file per day:
+         1min  -> Level1A_Processed_Data_1min/YYYY/<Site>_Picarro-<Species>_YYYYMMDD.csv
+         60min -> Level1B_Processed_Data_1hr/YYYY/<Site>_Picarro-<Species>_YYYYMMDD.csv
+       Missing values are written as -9999. All times are UTC.
+
+How to use:
+    1. Edit the "USER SETTINGS" block below.
+    2. Save this file.
+    3. Run it (see README.md), e.g. in the VS Code terminal:
+         python preprocessing_Picarro.py
+
+@author: Shenglun Wu
 @date: Dec 2024
 """
 
-import numpy as np # type: ignore
-import pandas as pd # type: ignore
-import sys, os
+import os
+
+import numpy as np
+import pandas as pd
+
+
+# =============================================================================
+# USER SETTINGS - change these values before running the script
+# =============================================================================
+
+# Path to the "!Site Operations" folder of the APRS SharePoint (synced to your
+# computer with OneDrive). os.path.expanduser("~") is your home folder
+# (C:/Users/<your user name>), so this usually works for everyone without changes.
+# If your folder is somewhere else, replace it with the full path, using "/", e.g.
+# BASE_PATH = "C:/Users/swu/OneDrive - California Air Resources Board/Shared Documents - RD ASCSB APRS/General/02. In-House Research/!Site Operations"
+BASE_PATH = os.path.expanduser("~") + "/OneDrive - California Air Resources Board/Shared Documents - RD ASCSB APRS/General/02. In-House Research/!Site Operations"
+
+# Site to process. Options:
+#   'Fresno-Garland Supersite', 'Bakersfield-California Ave Supersite', 'MWO'
+SITE = 'MWO'
+
+# Analyzer to process. Options: 'CO', 'HCHO', 'NH3'
+ANALYZER = 'CO'
+
+# First and last day to process (UTC), format 'YYYY-MM-DD'. Both days are included.
+# To process only one day, use the same date for both.
+START_DATE = '2025-02-01'
+END_DATE = '2025-03-01'
+
+# Averaging time. Options:
+#   '1min'  -> saved in folder Level1A_Processed_Data_1min
+#   '60min' -> saved in folder Level1B_Processed_Data_1hr
+AVERAGE_TIME = '60min'
+
+# =============================================================================
+# END OF USER SETTINGS - you normally do not need to change anything below
+# =============================================================================
+
+
+VALID_SITES = ['Fresno-Garland Supersite', 'Bakersfield-California Ave Supersite', 'MWO']
+VALID_AVERAGE_TIMES = ['1min', '60min']
 
 
 def standardize_name(analyzer):
     """
-    This function standarize the name of species and analyzer.
+    Convert any accepted analyzer/species name to the standard names used in
+    folder and file names.
+
     Input:
-        analyzer: str, species name (e.g. 'COC', 'Formaldehyde, 'Ammonia')
+        analyzer: str, analyzer or species name (e.g. 'CO', 'G2401', 'Formaldehyde', 'Ammonia')
     Return:
-        analyzer: str, standardized analyzer name
-        species: str, standardized species name
+        analyzer: str, standard analyzer (folder) name, e.g. 'CO_Picarro'
+        species: str, standard species name used in output file names, e.g. 'CO2-CO-CH4'
     """
 
-    if analyzer == 'G2401' or analyzer == 'CO' or analyzer == 'CO2' \
-        or analyzer == 'CH4' or analyzer == 'CO_Picarro':
+    if analyzer in ['G2401', 'CO', 'CO2', 'CH4', 'CO_Picarro']:
         analyzer = 'CO_Picarro'
         species = 'CO2-CO-CH4'
 
-    elif analyzer == 'Formaldehyde' or analyzer == 'HCHO' or analyzer == 'G2307' \
-        or analyzer == 'HCHO_Picarro':
+    elif analyzer in ['Formaldehyde', 'HCHO', 'G2307', 'HCHO_Picarro']:
         analyzer = 'HCHO_Picarro'
         species = 'HCHO'
 
-    elif analyzer == 'Ammonia' or analyzer == 'NH3' or analyzer == 'G2103' \
-        or analyzer == 'NH3_Picarro':
+    elif analyzer in ['Ammonia', 'NH3', 'G2103', 'NH3_Picarro']:
         analyzer = 'NH3_Picarro'
         species = 'NH3-H2O'
 
     else:
-        print('Monitor not found!')
-        sys.exit()
+        raise ValueError(
+            f"Analyzer '{analyzer}' not found! Valid options are: 'CO', 'HCHO', 'NH3'"
+        )
 
     return analyzer, species
 
 
 def find_data_folder(site, analyzer):
-    """ 
-    Returns the folder location based on the site and analyzer name. 
-    Input: 
-        site (str): Name of the site (e.g., 'Fresno' or 'Bakersfield') 
-        analyzer (str): Name of the analyzer (e.g., 'NH3', 'CO', 'HCHO') 
-    Returns: 
-        folder: str The folder location that stores the data 
-    """ 
-    
-    base_path = "C:/Users/swu/OneDrive - California Air Resources Board/Shared Documents - RD ASCSB APRS/General/02. In-House Research/!Site Operations"
+    """
+    Return the folder that stores the data of one analyzer at one site.
 
-    valid_sites = ['Fresno-Garland Supersite', 'Bakersfield-California Ave Supersite', 'MWO'] 
+    Input:
+        site: str, site name (one of VALID_SITES)
+        analyzer: str, standard analyzer name (e.g. 'NH3_Picarro', 'CO_Picarro', 'HCHO_Picarro')
+    Return:
+        folder: str, e.g. '<BASE_PATH>/MWO/CO_Picarro'
+    """
 
-    if site not in valid_sites: 
-        raise ValueError(f"Invalid site name '{site}'. Valid options are: {valid_sites}")
+    if site not in VALID_SITES:
+        raise ValueError(f"Invalid site name '{site}'. Valid options are: {VALID_SITES}")
 
-    valid_analyzers = ['NH3_Picarro', 'CO_Picarro', 'HCHO_Picarro']         
-    
-    if analyzer not in valid_analyzers: 
-        raise ValueError(f"Invalid analyzer name '{analyzer}'. Valid options are: {valid_analyzers}") 
+    valid_analyzers = ['NH3_Picarro', 'CO_Picarro', 'HCHO_Picarro']
 
-    folder = f"{base_path}/{site}/{analyzer}" 
+    if analyzer not in valid_analyzers:
+        raise ValueError(f"Invalid analyzer name '{analyzer}'. Valid options are: {valid_analyzers}")
 
-    return folder  # Example usage site = "Fresno" analyzer = "NH3" 
+    folder = f"{BASE_PATH}/{site}/{analyzer}"
+
+    return folder
 
 
 def find_daily_raw_datafile(folder, date):
     """
-    This function is used to find daily raw datafiles from Picarro monitor in Shared folder Data Portal.
-    Input: 
-        folder: str, folder path to the project and analyzer. 
-        date: datetime, date to process (in UTC, set by the monitor)
-    Output:
-        filepath: list, list of path of raw datafiles in one day
+    Find all raw data files of one day.
+
+    The Picarro writes one file per hour, named by the time the file STARTS.
+    The file that starts at 23:00 on the previous day also contains the first
+    minutes of this day, so it is included as well.
+
+    Input:
+        folder: str, analyzer folder (from find_data_folder)
+        date: str or datetime, day to process (UTC, the analyzer clock)
+    Return:
+        filepath: list of str, paths of the raw data files,
+                  or None if no file is found (a message is printed)
     """
-    
-    # formatting Date and species
+
     date = pd.to_datetime(date)
     YY = date.strftime('%Y')
     mm = date.strftime('%m')
     dd = date.strftime('%d')
-    
-    # get all files in the directory when folder and data file exist
+
+    # raw files are stored in Level0_Raw_Data/YYYY/MM/DD/
     folderpath = folder + '/Level0_Raw_Data/' + YY + '/' + mm + '/' + dd
-    
+
     if not os.path.exists(folderpath):
         print('Folder not found on ', date.strftime('%Y%m%d'), '!')
-        pass
+        return None
 
-    elif len(os.listdir(folderpath)) == 0:
+    files = os.listdir(folderpath)
+    if len(files) == 0:
         print('No data file on ', date.strftime('%Y%m%d'), '!')
-        pass
+        return None
 
-    else:
-        files = os.listdir(folderpath)
-        filepath = [folderpath + '/' + file for file in files]
+    filepath = [folderpath + '/' + file for file in files]
 
-        # get data from 1 day before (part of data was recorded on the previous day's data)
-        date2 = date - pd.DateOffset(days=1)
-        YY2 = date2.strftime('%Y')
-        mm2 = date2.strftime('%m')
-        dd2 = date2.strftime('%d')
-        folderpath2 = folder + '/Level0_Raw_Data/' + YY + '/' + mm2 + '/' + dd2
+    # add the 23:00 file(s) from the previous day (they contain data from the first minutes of this day)
+    date2 = date - pd.DateOffset(days=1)
+    YY2 = date2.strftime('%Y')
+    mm2 = date2.strftime('%m')
+    dd2 = date2.strftime('%d')
+    folderpath2 = folder + '/Level0_Raw_Data/' + YY2 + '/' + mm2 + '/' + dd2
 
-        # check if the folderpath2 exists
-        if not os.path.exists(folderpath2):
-            pass
-        else:
-            files2 = os.listdir(folderpath2)
-            files2 = [file for file in files2 if '-23' in file]  # select string contains -23 in files2 (data recorded from 23:00)
-            filepath2 = [folderpath2 + '/' + file for file in files2]
+    if os.path.exists(folderpath2):
+        files2 = os.listdir(folderpath2)
+        files2 = [file for file in files2 if '-23' in file]  # file names with '-23' start at 23:00
+        filepath2 = [folderpath2 + '/' + file for file in files2]
+        filepath = filepath2 + filepath
 
-            # combine filepaths
-            filepath = filepath2 + filepath
-
-        return filepath
+    return filepath
 
 
-# Degugging step1: check filename (make sure the file is from the correct analyzer) 
+# Debugging step 1: check file names (make sure the files are from the correct analyzer)
 def check_data_filename(filepath, analyzer):
     """
-    Make sure a data file is from the correct analyzer (first 10 digit of the raw data file is the serial number of the Picarro analyzer, check whether the filepath contains correction Site location and Analyzer name (e.g. Fresno/CO_Picarro) that matches the serial number)
+    Make sure the data files come from the correct analyzer.
+
+    Each raw file name starts with the serial number of the Picarro analyzer
+    (e.g. 'CFKADS...' for the CO analyzer). If a file in the folder does not
+    match the expected analyzer, a warning is printed (files may have been put
+    in the wrong folder).
+
     Input:
-        filepath: list, list of path of raw datafiles in one day
-        analyzer: str, standard analyzer name (shown in id_dict)
-    Output:
-        warning message will be printed out if there is any trouble
+        filepath: list of str, raw data files of one day (from find_daily_raw_datafile)
+        analyzer: str, standard analyzer name (a key of id_dict below)
+    Return:
+        None (prints a warning if a wrong file is found)
     """
 
-    # analyzer and its id number
+    # standard analyzer name -> start of its serial number
     id_dict = {'CO_Picarro': 'CFKADS', 'NH3_Picarro': 'AHDS', 'HCHO_Picarro': 'LBDS'}
+    analyzer_id = id_dict[analyzer]
 
     for file in filepath:
-        analyzer_id = id_dict[analyzer]
-
         if analyzer_id not in file:
-            date = filepath[-1].split('/')[-4:-1]
+            date = filepath[-1].split('/')[-4:-1]  # ['YYYY', 'MM', 'DD'] from the folder path
             date = ''.join(date)
-            print('Wrong ', analyzer, ' data files on ' , date, '!')            
-            
-            break # only report warning once if there is any trouble
+            print('Wrong ', analyzer, ' data files on ', date, '!')
+
+            break  # only report the warning once
 
 
 def daily_raw_data(filepath):
     """
-    This function is to get daily raw data in one dataframe.
+    Read all raw data files of one day and combine them into one table.
+
     Input:
-        folder: str, folder path to the project. (e.g 'W:/3. APRS - Data_Portal/5. Fresno-Garland Supersite/HCHO_Picarro')
-        date: datetime, date to process
-    Output:
-        df_daily: dataframe, daily raw data in one dataframe
+        filepath: list of str, raw data files of one day (from find_daily_raw_datafile)
+    Return:
+        df_daily: DataFrame, raw data of that day only, indexed by DATETIME
     """
 
-    # find date of data
+    # the day being processed is read from the name of the last file, e.g. '...-20250101-230500Z-...'
     date = pd.to_datetime(filepath[-1].split('/')[-1].split('-')[1], format='%Y%m%d')
 
-    # combine all data files in one day
     df_daily = pd.DataFrame()
 
     for i in range(len(filepath)):
-    
-        # open single data file
+
+        # columns in the raw file are separated by spaces
         df = pd.read_csv(filepath[i], sep=r'\s+')
 
-        # Renaming the columns (no '_sync' for sync data) 
+        # some files name the columns with '_sync' (e.g. 'CO_sync'); remove it so all files match
         df.columns = [col.replace('_sync', '') for col in df.columns]
 
-        # combine all data files
         df_daily = pd.concat([df_daily, df])
 
-    # select data for the date
+    # keep only the rows of the day being processed
     df_daily = df_daily[pd.to_datetime(df_daily['DATE']) == date]
 
     df_daily['DATETIME'] = pd.to_datetime(df_daily['DATE'] + ' ' + df_daily['TIME'])
@@ -187,86 +240,90 @@ def daily_raw_data(filepath):
     return df_daily
 
 
-# Degubbing step2: check raw data alarm status (alarms from analyzer)
-def screen_warning_df_daily(df_daily, analyzer):
+def normal_inst_status(analyzer):
     """
-    Check any warnings in the raw daily data directly reported from Picarro analyzer (warnings include: ALARM_STATUS, INST_STATUS, MPVPosition).
-
-    Input:
-        df_daily: dataframe, daily raw data in one dataframe
-
-    Output:
-        warning message will be printed out if there is any trouble
+    Return the INST_STATUS value that means "instrument OK" for the analyzer.
+    (NH3 analyzer: 899, CO and HCHO analyzers: 963)
     """
 
     if analyzer == 'NH3_Picarro':
-        inst_status = 899
+        return 899
     else:
-        inst_status = 963
+        return 963
 
-    # check if ALARM_STATUS is all 0 (alarm code)
+
+# Debugging step 2: check raw data alarm status (alarms reported by the analyzer)
+def screen_warning_df_daily(df_daily, analyzer):
+    """
+    Print a warning if the analyzer reported any problem during the day.
+
+    Checked columns:
+        ALARM_STATUS: should always be 0 (alarm code)
+        INST_STATUS:  should always be 963 (899 for the NH3 analyzer) (instrument status)
+        MPVPosition:  should always be 0 (valve position)
+
+    Input:
+        df_daily: DataFrame, raw data of one day (from daily_raw_data)
+        analyzer: str, standard analyzer name
+    Return:
+        None (prints warnings)
+    """
+
+    inst_status = normal_inst_status(analyzer)
+
     if df_daily['ALARM_STATUS'].sum() != 0:
-        print('ALARM_STATUS is not all 0!')   
-    else:
-        pass
+        print('ALARM_STATUS is not all 0!')
 
-    # check INST_STATUS is all 963.0 (instriment status)
     if df_daily['INST_STATUS'].sum() != inst_status * len(df_daily):
         print('INST_STATUS has warning!')
-    else:
-        pass
-    
-    # check MPVPosition is all 0 (calve position)
+
     if df_daily['MPVPosition'].sum() != 0:
         print('MPVPosition is not all 0!')
-    else:
-        pass
 
 
 def clean_warning_data(df_daily, analyzer):
     """
-    This function is used to filter out the warning data from raw dataset
+    Remove the rows that have a warning (see screen_warning_df_daily).
+
     Input:
-        df_daily: dataframe, daily raw data in one dataframe
-    
-    Output:
-        df_daily_clean: dataframe, daily raw data without warning
+        df_daily: DataFrame, raw data of one day
+        analyzer: str, standard analyzer name
+    Return:
+        df_daily_nowarning: DataFrame, raw data without the warning rows
     """
 
-    if analyzer == 'NH3_Picarro':
-        inst_status = 899
-    else:
-        inst_status = 963    
+    inst_status = normal_inst_status(analyzer)
 
-    # clean warning data
     df_daily_nowarning = df_daily.copy()
     df_daily_nowarning = df_daily_nowarning[
-        (df_daily_nowarning['ALARM_STATUS'] == 0)&
-        (df_daily_nowarning['INST_STATUS'] == inst_status)&
+        (df_daily_nowarning['ALARM_STATUS'] == 0) &
+        (df_daily_nowarning['INST_STATUS'] == inst_status) &
         (df_daily_nowarning['MPVPosition'] == 0)
     ]
-    
+
     return df_daily_nowarning
 
 
 def clean_parameter_column(df_daily_nowarning, analyzer):
     """
-    This function is used to filter useful column (measured concentration) from the raw daily data from Picarro monitor.
+    Keep only the useful columns (date, time and measured concentrations).
+
     Input:
-        df_daily: dataframe, daily raw data in one dataframe
-    Output:
-        df_daily_clean: dataframe, daily raw data with useful columns
+        df_daily_nowarning: DataFrame, raw data without warning rows
+        analyzer: str, standard analyzer name
+    Return:
+        df_daily_clean: DataFrame, data with only the useful columns
     """
 
-    column_dict = {'CO_Picarro': ['DATE', 'TIME', 'CO', 'CO2', 'CO2_dry', 
+    # columns to keep for each analyzer
+    column_dict = {'CO_Picarro': ['DATE', 'TIME', 'CO', 'CO2', 'CO2_dry',
                                   'CH4', 'CH4_dry', 'H2O'],
                    'HCHO_Picarro': ['DATE', 'TIME', 'H2CO', 'H2O', 'CH4'],
                    'NH3_Picarro': ['DATE', 'TIME', 'NH3', 'NH3_dry', 'H2O', 'CO2']}
 
     parameter_columns = column_dict[analyzer]
-    
-    df_daily_clean = df_daily_nowarning.copy()
 
+    df_daily_clean = df_daily_nowarning.copy()
     df_daily_clean = df_daily_clean[parameter_columns]
 
     return df_daily_clean
@@ -274,33 +331,37 @@ def clean_parameter_column(df_daily_nowarning, analyzer):
 
 def average_daily_data(df_daily_clean, average_time, std=True, se=True):
     """
-    This function is used to average daily raw data from Picarro monitor, .
+    Average the data to the chosen time resolution.
+
+    For every measured column X, three columns are created:
+        X      : mean
+        X_std  : standard deviation
+        X_se   : standard error (std / sqrt(number of points))
+
     Input:
-        df_daily: dataframe, daily raw data in one dataframe
-        average_time: str, time to average (e.g. '1min', '10min')
-        missing_data: bool, True if fill in missing data, False if not
-    Output:
-        df_avg: dataframe, averaged data
+        df_daily_clean: DataFrame, cleaned data of one day (indexed by DATETIME)
+        average_time: str, averaging time (e.g. '1min', '60min')
+        std, se: not used (std and se are always calculated); kept for compatibility
+    Return:
+        df_avg: DataFrame, averaged data (indexed by DATETIME)
     """
 
-    # averaging
     df = df_daily_clean.copy()
     df.drop(columns=['DATE', 'TIME'], inplace=True)
-    
-    # calculate mean, std, and se for each time
-    def calc_se(x): 
-        return x.std() / np.sqrt(len(x)) 
-    # Define the aggregation functions 
-    agg_funcs = {col: ['mean', 'std', calc_se] for col in df.columns} 
 
-    # Resample and aggregate 
+    def calc_se(x):
+        return x.std() / np.sqrt(len(x))
+
+    # calculate mean, std and se of every column
+    agg_funcs = {col: ['mean', 'std', calc_se] for col in df.columns}
+
     df_avg = df.resample(average_time).agg(agg_funcs)
-    df_avg = df_avg.round(3) 
+    df_avg = df_avg.round(3)
 
-    # Flatten the MultiIndex columns 
-    new_columns = [] 
-    for col in df.columns: 
-        new_columns.extend([col, f"{col}_std", f"{col}_se"]) 
+    # rename the columns, e.g. ('CO', 'mean') -> 'CO', ('CO', 'std') -> 'CO_std'
+    new_columns = []
+    for col in df.columns:
+        new_columns.extend([col, f"{col}_std", f"{col}_se"])
     df_avg.columns = new_columns
 
     return df_avg
@@ -308,73 +369,82 @@ def average_daily_data(df_daily_clean, average_time, std=True, se=True):
 
 def fill_missing_data(df_avg, average_time):
     """
-    Used to fill in missing time in a specific time range.
+    Add empty rows for missing times so every daily file has the full set of
+    time steps (00:00 to 23:59 at the averaging resolution).
+
     Input:
-        df_avg: dataframe, averaged data
-        average_time: str, time to average (e.g. '1min', '10min')
-    Output:
-        df_avg: dataframe, averaged data with missing time filled
+        df_avg: DataFrame, averaged data (from average_daily_data)
+        average_time: str, averaging time (e.g. '1min', '60min')
+    Return:
+        df_avg: DataFrame, averaged data with DATE and TIME columns and no missing time steps
     """
-    
+
     df_avg['TIME'] = df_avg.index.time
 
-    # fill in missing time
+    # table with every time step of the day
     time_range = pd.date_range(start='00:00', end='23:59', freq=average_time).time
     df_dt = pd.DataFrame(
         {'DATE': df_avg.index[0].date().strftime('%Y-%m-%d'),
-        'TIME' : time_range}
+         'TIME': time_range}
     )
-    df_avg = pd.merge(df_dt, df_avg, on='TIME', how='left')    
+    df_avg = pd.merge(df_dt, df_avg, on='TIME', how='left')
 
     return df_avg
 
 
 def processed_data_folder_level1a(folder):
     """
-    Generate folder path to store processed data.
+    Return (and create if needed) the folder for 1-minute data.
+
     Input:
-        folder: str, folder path to the analyzer data. From function: find_data_folder
-    Output:
-        folder: str, folder path to store processed data
+        folder: str, analyzer folder (from find_data_folder)
+    Return:
+        folder_level1a: str, '<folder>/Level1A_Processed_Data_1min'
     """
 
     folder_level1a = folder + '/Level1A_Processed_Data_1min'
-    if not os.path.exists(folder):
-        os.makedirs(folder)
+    if not os.path.exists(folder_level1a):
+        os.makedirs(folder_level1a)
 
     return folder_level1a
 
 
 def processed_data_folder_level1b(folder):
     """
-    Generate folder path to store processed data.
+    Return (and create if needed) the folder for 1-hour data.
+
     Input:
-        folder: str, folder path to the analyzer data. From function: find_data_folder
-    Output:
-        folder: str, folder path to store processed data
+        folder: str, analyzer folder (from find_data_folder)
+    Return:
+        folder_level1b: str, '<folder>/Level1B_Processed_Data_1hr'
     """
 
     folder_level1b = folder + '/Level1B_Processed_Data_1hr'
-    if not os.path.exists(folder):
-        os.makedirs(folder)
+    if not os.path.exists(folder_level1b):
+        os.makedirs(folder_level1b)
 
     return folder_level1b
 
 
 def store_processed_data(folder_level1a, site, species, date, df_avg):
     """
-    Store processed data to the folder.
+    Save the processed data of one day as a CSV file.
+
+    File: <folder_level1a>/YYYY/<Site>_Picarro-<species>_YYYYMMDD.csv
+    DATE and TIME columns are renamed to DATE_UTC and TIME_UTC.
+    Missing values are written as -9999.
+
     Input:
-        folder_level1a: str, folder path to store processed data
+        folder_level1a: str, output folder (Level1A or Level1B folder)
         site: str, site name (e.g. 'Fresno-Garland Supersite')
-        analyzer: str, standard species name
-        date: datetime, date to process
-        df_avg: dataframe, processed averaged df_daily
-    Output:
+        species: str, standard species name (from standardize_name)
+        date: str or datetime, day processed
+        df_avg: DataFrame, processed data of that day
+    Return:
         None
     """
 
-    # create file name
+    # file name, e.g. 'Fresno_Picarro-CO2-CO-CH4_20250101.csv'
     site_name = site.split('-')[0]
     monitor_name = 'Picarro-' + species
     YY = pd.to_datetime(date).strftime('%Y')
@@ -383,14 +453,12 @@ def store_processed_data(folder_level1a, site, species, date, df_avg):
     filename = site_name + '_' + monitor_name + '_' + date + '.csv'
     filepath = folder_level1a + '/' + YY + '/' + filename
 
-    # create folder if not exist
+    # create the year folder if it does not exist
     if not os.path.exists(folder_level1a + '/' + YY):
         os.makedirs(folder_level1a + '/' + YY)
 
-    # rename columns
-    df_avg.rename(columns={'DATE':'DATE_UTC', 'TIME':'TIME_UTC'}, inplace=True)
+    df_avg.rename(columns={'DATE': 'DATE_UTC', 'TIME': 'TIME_UTC'}, inplace=True)
 
-    # fill NaN with -9999
     df_avg.fillna(-9999, inplace=True)
 
     df_avg.to_csv(filepath, index=False)
@@ -399,71 +467,59 @@ def store_processed_data(folder_level1a, site, species, date, df_avg):
 
 def main(site, analyzer, date, average_time='1min'):
     """
-    Main function to process raw data from Picarro monitor.
+    Process the Picarro raw data of ONE day and save the result.
+
     Input:
         site: str, site name (e.g. 'Fresno-Garland Supersite')
         analyzer: str, analyzer name (e.g. 'NH3', 'CO', 'HCHO')
-        date: datetime, date to process
-        average_time: str, time to average (e.g. '1min', '10min')
-    Output:
+        date: str or datetime, day to process (e.g. '2025-01-31')
+        average_time: str, '1min' or '60min'
+    Return:
         None
     """
 
+    if average_time not in VALID_AVERAGE_TIMES:
+        raise ValueError(
+            f"Invalid average time '{average_time}'. Valid options are: {VALID_AVERAGE_TIMES}"
+        )
+
     analyzer, species = standardize_name(analyzer)
 
-    # find folder path
     folder = find_data_folder(site, analyzer)
 
-    # find daily raw datafile
     filepath = find_daily_raw_datafile(folder, date)
 
-    if filepath is not None:
-        
-        # check data filename
-        check_data_filename(filepath, analyzer)
+    if filepath is None:
+        return  # no data on this day (message already printed)
 
-        # get daily raw data
-        df_daily = daily_raw_data(filepath)
+    check_data_filename(filepath, analyzer)
 
-        # check raw data alarm status
-        screen_warning_df_daily(df_daily, analyzer)
+    df_daily = daily_raw_data(filepath)
 
-        # clean warning data
-        df_daily_nowarning = clean_warning_data(df_daily, analyzer)
+    screen_warning_df_daily(df_daily, analyzer)
 
-        if df_daily_nowarning.empty:
-            print('All data has warning on ', date, '!')
-            pass
+    df_daily_nowarning = clean_warning_data(df_daily, analyzer)
 
-        else:
-            # clean parameter column
-            df_daily_clean = clean_parameter_column(df_daily_nowarning, analyzer)
+    if df_daily_nowarning.empty:
+        print('All data has warning on ', date, '!')
+        return
 
-            # average daily data
-            df_avg = average_daily_data(df_daily_clean, average_time, std=True, se=True)
-            df_avg = fill_missing_data(df_avg, average_time)
-            
-            # store processed data
-            if average_time == '1min':
-                folder_level1a = processed_data_folder_level1a(folder)
-                store_processed_data(folder_level1a, site, species, date, df_avg)
-            
-            elif average_time == '60min':
-                folder_level1b = processed_data_folder_level1b(folder)
-                store_processed_data(folder_level1b, site, species, date, df_avg)
-            
-            else:
-                print('Invalid average time!')
-                pass
+    df_daily_clean = clean_parameter_column(df_daily_nowarning, analyzer)
+
+    df_avg = average_daily_data(df_daily_clean, average_time, std=True, se=True)
+    df_avg = fill_missing_data(df_avg, average_time)
+
+    if average_time == '1min':
+        output_folder = processed_data_folder_level1a(folder)
+    else:  # '60min'
+        output_folder = processed_data_folder_level1b(folder)
+
+    store_processed_data(output_folder, site, species, date, df_avg)
 
 
 if __name__ == "__main__":
-    site = 'MWO' # 'Fresno-Garland Supersite', 'Bakersfield-California Ave Supersite', 'MWO'
-    analyzer = 'CO' # 'CO', 'HCHO', 'NH3'
-    #date = '2024-11-01'
-    #main(site, analyzer, date, average_time='1min')
+    # process every day from START_DATE to END_DATE (settings at the top of this file)
+    dates = pd.date_range(start=START_DATE, end=END_DATE, freq='D')
 
-    dates = pd.date_range(start='2025-2-1', end='2025-3-1', freq='D')
-    
     for date in dates:
-        main(site, analyzer, date, average_time='60min') # average time = '1min' or '60min'
+        main(SITE, ANALYZER, date, average_time=AVERAGE_TIME)

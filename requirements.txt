@@ -1,0 +1,4 @@
+# Python packages needed by the scripts in code/script.
+# Install them with:  pip install -r requirements.txt
+numpy>=1.24
+pandas>=2.0,<3.0
