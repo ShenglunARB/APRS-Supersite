@@ -1,0 +1,6 @@
+{
+    // VS Code will suggest installing these extensions when this folder is opened
+    "recommendations": [
+        "ms-python.python"
+    ]
+}

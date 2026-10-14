@@ -1,0 +1,6 @@
+{
+    // Use the project's virtual environment (.venv) automatically
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    // The "Run Python File" button runs the script from the script's own folder
+    "python.terminal.executeInFileDir": true
+}
